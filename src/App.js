@@ -155,7 +155,7 @@ const fmt = (n) => {
   return String(n);
 };
 
-const SYS = "You are an AI content pipeline agent. Respond ONLY with raw valid JSON. No markdown, no backticks, no explanation.";
+const SYS = "You are an AI content pipeline agent. Respond ONLY with raw valid JSON. No markdown, no backticks, no preamble, no explanation. Just the JSON object.";
 
 export default function App() {
   const [screen, setScreen] = useState("setup");
@@ -178,70 +178,148 @@ export default function App() {
     setRes({ scraper: null, validator: null, script: null, hooks: null });
 
     try {
-      // ── AGENT 01 ──────────────────────────────────
+
+      // ── AGENT 01: Content Scraper ─────────────────────────────────────────
       setS(1, "running");
       let scraper;
       try {
         scraper = await scrapeApify(cfg.keywords, cfg.competitors, cfg.niche);
-        if (!scraper?.posts?.length) throw new Error("No posts returned");
+        if (!scraper?.posts?.length) throw new Error("empty");
       } catch {
+        // Fallback: AI simulates viral post data
         scraper = await callClaude(SYS,
-          `Simulate 10 viral posts for the "${cfg.niche}" niche. Keywords: ${cfg.keywords}.
-           Return JSON: { "posts": [ { "platform":"Instagram", "hook":"compelling opening line",
-           "topic":"cluster name", "views":250000, "likes":12000, "comments":600,
-           "engagementRate":5.2, "daysAgo":2, "format":"Reel", "viral":true } ] }
-           Generate exactly 10 posts. 3 should be viral (views>100K, ER>5%). Make hooks realistic.`
+          `Generate exactly 10 viral social media posts for the "${cfg.niche}" niche. Keywords: ${cfg.keywords}.
+Return ONLY a JSON object with this exact structure:
+{
+  "posts": [
+    {
+      "platform": "Instagram",
+      "hook": "compelling opening line under 120 characters",
+      "topic": "topic cluster name",
+      "views": 250000,
+      "likes": 12000,
+      "comments": 600,
+      "engagementRate": 5.2,
+      "daysAgo": 2,
+      "format": "Reel",
+      "viral": true
+    }
+  ]
+}
+Rules:
+- Generate exactly 10 posts total
+- Mix platforms: Instagram (5), YouTube (3), Twitter (2)
+- Mix formats: Reel, Short, Tweet
+- At least 3 posts must have views above 100000 and engagementRate above 5 and viral true
+- Make hooks specific and realistic for the ${cfg.niche} niche
+- views should range from 15000 to 800000
+- engagementRate should range from 1.2 to 9.5
+- daysAgo should range from 1 to 7`
         );
       }
+      if (!scraper?.posts?.length) scraper = { posts: [] };
       setRes((p) => ({ ...p, scraper }));
       setS(1, "done");
 
-      // ── AGENT 02 ──────────────────────────────────
+      // ── AGENT 02: Validation Agent ────────────────────────────────────────
       setS(2, "running");
       const validator = await callClaude(SYS,
-        `Validate and rank this content data for the "${cfg.niche}" niche:
-         ${JSON.stringify(scraper)}
-         Return JSON: { "topTopics": [ { "topic":"name", "avgViews":150000, "postCount":3,
-         "trend":"rising|stable|fading" } ], "topFormats": [ { "format":"Reel",
-         "avgER":6.2, "avgShares":1800 } ], "recommendation":"specific recommended topic
-         with data-backed reason in 1-2 sentences", "viralSignals":["signal1","signal2"],
-         "sustainedTrends":["trend1"] }
-         topTopics: top 4. topFormats: top 3. Be specific with numbers.`
+        `You are a content validation agent. Analyze this social media data for the "${cfg.niche}" niche:
+${JSON.stringify(scraper.posts || [])}
+
+Return ONLY a JSON object with this exact structure:
+{
+  "topTopics": [
+    { "topic": "topic name", "avgViews": 150000, "postCount": 3, "trend": "rising" }
+  ],
+  "topFormats": [
+    { "format": "Reel", "avgER": 6.2, "avgShares": 1800 }
+  ],
+  "recommendation": "one specific recommended topic with data-backed reason in 1-2 sentences",
+  "viralSignals": ["signal 1", "signal 2", "signal 3"],
+  "sustainedTrends": ["trend 1", "trend 2"]
+}
+Rules:
+- topTopics: exactly 4 topics ranked by avgViews descending
+- topFormats: exactly 3 formats ranked by avgER descending
+- trend must be one of: rising, stable, fading
+- recommendation must mention specific view numbers
+- viralSignals: 3 specific observations from the data
+- sustainedTrends: 2 patterns appearing consistently`
       );
       setRes((p) => ({ ...p, validator }));
       setS(2, "done");
 
-      // ── AGENT 03 ──────────────────────────────────
+      // ── AGENT 03: Script Writer ───────────────────────────────────────────
       setS(3, "running");
-      const topic = cfg.topic || validator.recommendation;
+      const topic = cfg.topic || validator?.recommendation || cfg.niche;
       const script = await callClaude(SYS,
-        `Write a reel script in this creator's exact voice.
-         Voice: ${cfg.voice} | Language: ${cfg.lang}
-         ${cfg.scripts ? `Sample scripts:\n${cfg.scripts}\n` : ""}
-         Topic: ${topic}
-         Trend context: ${validator.recommendation}
-         Write the body ONLY — NO hook. Structure: beat1 → beat2 → beat3 → cta.
-         Each beat: 2-3 sentences max. CTA must trigger comments.
-         Return JSON: { "topic":"confirmed topic", "script":{ "beat1":"...", "beat2":"...",
-         "beat3":"...", "cta":"..." }, "duration":"45-55 sec", "notes":["voice match note"] }`
+        `You are a reel script writer. Write a script in this creator's exact voice.
+Voice style: ${cfg.voice}
+Language: ${cfg.lang}
+Topic: ${topic}
+${cfg.scripts ? `Creator's past scripts for voice reference:\n${cfg.scripts}\n` : ""}
+
+Return ONLY a JSON object with this exact structure:
+{
+  "topic": "confirmed topic title",
+  "script": {
+    "beat1": "2-3 sentences for the setup beat",
+    "beat2": "2-3 sentences for the value/main point beat",
+    "beat3": "2-3 sentences for the proof or payoff beat",
+    "cta": "1-2 sentences for the call to action that triggers comments"
+  },
+  "duration": "45-55 sec",
+  "notes": ["voice match observation 1", "voice match observation 2"]
+}
+Rules:
+- Write the body ONLY, NO hook (hook is handled separately)
+- Match the ${cfg.lang} language style exactly
+- Keep each beat to 2-3 short sentences maximum
+- CTA must ask viewers to comment something specific
+- Never sound generic or corporate`
       );
       setRes((p) => ({ ...p, script }));
       setS(3, "done");
 
-      // ── AGENT 04 ──────────────────────────────────
+      // ── AGENT 04: Hook Generator ──────────────────────────────────────────
       setS(4, "running");
       const hooks = await callClaude(SYS,
-        `Generate 5 hooks for this reel. Topic: ${script.topic}. Voice: ${cfg.voice}. Niche: ${cfg.niche}.
-         Each hook: max 2 lines, speakable in under 4 seconds, in ${cfg.lang}.
-         One hook per pattern: Aspirational, Pain Point, Exclusivity, Specific Result, Curiosity Gap.
-         Return JSON: { "hooks": [ { "text":"hook here", "pattern":"Aspirational",
-         "explanation":"why it works for this niche", "confidence":8.5 } ], "recommendedIndex":0 }
-         recommendedIndex: 0-4, the best hook for this niche.`
+        `You are a hook writing specialist. Generate 5 hooks for this reel.
+Topic: ${script?.topic || topic}
+Voice: ${cfg.voice}
+Language: ${cfg.lang}
+Niche: ${cfg.niche}
+
+Return ONLY a JSON object with this exact structure:
+{
+  "hooks": [
+    {
+      "text": "the hook text here",
+      "pattern": "Aspirational",
+      "explanation": "why this works for this niche",
+      "confidence": 8.5
+    }
+  ],
+  "recommendedIndex": 0
+}
+Rules:
+- Generate exactly 5 hooks, one per pattern in this exact order:
+  1. Aspirational - shows the better version or outcome
+  2. Pain Point - names a frustration the viewer feels right now
+  3. Exclusivity - insider knowledge or secret feel
+  4. Specific Result - exact number and specific outcome
+  5. Curiosity Gap - question they cannot answer without watching
+- Each hook: maximum 2 lines, speakable in under 4 seconds
+- Write in ${cfg.lang} style matching: ${cfg.voice}
+- confidence is a number from 1 to 10
+- recommendedIndex is 0-4, the index of the best hook for this niche`
       );
       setRes((p) => ({ ...p, hooks }));
       setS(4, "done");
 
       setTimeout(() => setScreen("results"), 600);
+
     } catch (e) {
       setErr(e.message);
       setStatus((p) => {
@@ -264,13 +342,16 @@ export default function App() {
     setScreen("setup");
     setStatus({ 1: "idle", 2: "idle", 3: "idle", 4: "idle" });
     setRes({ scraper: null, validator: null, script: null, hooks: null });
-    setErr(null); setTab("scraper");
+    setErr(null);
+    setTab("scraper");
   };
 
   return (
     <>
       <style>{G}</style>
       <div className="app">
+
+        {/* ── HEADER ── */}
         <header className="hdr">
           <div className="logo"><div className="logo-dot" />Content OS</div>
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
@@ -281,6 +362,7 @@ export default function App() {
           </div>
         </header>
 
+        {/* ── PIPELINE BAR ── */}
         <div className="pipe-bar">
           {AGENTS.map((a) => (
             <div key={a.id} className={`pipe-step ${status[a.id] === "running" ? "s-active" : ""} ${status[a.id] === "done" ? "s-done" : ""}`}>
@@ -293,11 +375,13 @@ export default function App() {
         </div>
 
         <div className="main">
-          {/* ═══ SETUP ═══ */}
+
+          {/* ═══════════════ SETUP SCREEN ═══════════════ */}
           {screen === "setup" && (
             <div>
               <div className="h1">Build Your AI Content System</div>
               <div className="sub">Configure your 4-agent pipeline. Scrapes trends → validates → writes script → generates hooks. Runs in ~2 min.</div>
+
               <div className="fgrid">
                 <div>
                   <label className="flabel"><span className="flabel-num">01</span> Your Niche *</label>
@@ -308,6 +392,7 @@ export default function App() {
                   <input className="finput" placeholder="Leave blank → AI recommends" value={cfg.topic} onChange={(e) => set("topic", e.target.value)} />
                 </div>
               </div>
+
               <div className="fgrid">
                 <div>
                   <label className="flabel"><span className="flabel-num">03</span> Target Keywords *</label>
@@ -318,6 +403,7 @@ export default function App() {
                   <input className="finput" placeholder="@handle1, @handle2" value={cfg.competitors} onChange={(e) => set("competitors", e.target.value)} />
                 </div>
               </div>
+
               <div className="fgrid">
                 <div>
                   <label className="flabel"><span className="flabel-num">05</span> Voice Style</label>
@@ -331,26 +417,38 @@ export default function App() {
                 <div>
                   <label className="flabel"><span className="flabel-num">06</span> Script Language</label>
                   <select className="finput fselect" value={cfg.lang} onChange={(e) => set("lang", e.target.value)}>
-                    <option>Hinglish</option><option>English</option><option>Hindi</option>
-                    <option>Bengali</option><option>Tamil</option><option>Telugu</option>
+                    <option>Hinglish</option>
+                    <option>English</option>
+                    <option>Hindi</option>
+                    <option>Bengali</option>
+                    <option>Tamil</option>
+                    <option>Telugu</option>
                   </select>
                 </div>
               </div>
+
               <div className="fsingle">
                 <label className="flabel"><span className="flabel-num">07</span> Your Past Scripts / Captions</label>
                 <textarea className="ftextarea"
                   placeholder={"Paste 3-5 of your past reel captions here for better voice match.\n\nExample:\n\"Bhai, ye 3 AI tools free hain aur log paise de rahe hain...\"\n\"Main Claude se 1 ghante mein client ka pura content plan bana deta tha...\""}
-                  value={cfg.scripts} onChange={(e) => set("scripts", e.target.value)} />
+                  value={cfg.scripts}
+                  onChange={(e) => set("scripts", e.target.value)}
+                />
               </div>
+
               <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                <button className="btn btn-p" onClick={run} disabled={!cfg.niche || !cfg.keywords}>Run Full Pipeline →</button>
+                <button className="btn btn-p" onClick={run} disabled={!cfg.niche || !cfg.keywords}>
+                  Run Full Pipeline →
+                </button>
                 <span style={{ fontSize: "12px", color: "var(--muted)" }}>~2 min · 4 agents · Claude-powered</span>
               </div>
-              {(!cfg.niche || !cfg.keywords) && <p style={{ fontSize: "12px", color: "var(--muted)", marginTop: "8px" }}>* Niche and keywords required</p>}
+              {(!cfg.niche || !cfg.keywords) && (
+                <p style={{ fontSize: "12px", color: "var(--muted)", marginTop: "8px" }}>* Niche and keywords required</p>
+              )}
             </div>
           )}
 
-          {/* ═══ PIPELINE ═══ */}
+          {/* ═══════════════ PIPELINE SCREEN ═══════════════ */}
           {screen === "pipeline" && (
             <div>
               <div className="h1">Pipeline Running</div>
@@ -387,7 +485,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ═══ RESULTS ═══ */}
+          {/* ═══════════════ RESULTS SCREEN ═══════════════ */}
           {screen === "results" && (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px", marginBottom: "28px" }}>
@@ -400,43 +498,73 @@ export default function App() {
                   <button className="btn btn-p" style={{ fontSize: "12px", padding: "9px 16px" }} onClick={reset}>Run Again</button>
                 </div>
               </div>
+
               <div className="tabs">
-                {[{ id: "scraper", label: "01 · Scraper" }, { id: "validator", label: "02 · Validation" }, { id: "script", label: "03 · Script" }, { id: "hooks", label: "04 · Hooks" }].map((t) => (
+                {[
+                  { id: "scraper", label: "01 · Scraper" },
+                  { id: "validator", label: "02 · Validation" },
+                  { id: "script", label: "03 · Script" },
+                  { id: "hooks", label: "04 · Hooks" },
+                ].map((t) => (
                   <button key={t.id} className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>
                 ))}
               </div>
 
+              {/* ── TAB 01: SCRAPER ── */}
               {tab === "scraper" && res.scraper && (
                 <div style={{ overflowX: "auto" }}>
-                  <table className="tbl">
-                    <thead><tr><th>Platform</th><th style={{ minWidth: "220px" }}>Hook</th><th>Topic</th><th>Views</th><th>Likes</th><th>ER%</th><th>Age</th><th>Format</th></tr></thead>
-                    <tbody>
-                      {(res.scraper.posts || []).sort((a, b) => b.views - a.views).map((p, i) => (
-                        <tr key={i}>
-                          <td><span className={`plat plat-${(p.platform || "").toLowerCase()}`}>{p.platform}</span></td>
-                          <td style={{ maxWidth: "240px", fontSize: "13px" }}>{p.hook}{p.viral && <span className="vtag">Viral</span>}</td>
-                          <td style={{ color: "var(--muted)", fontSize: "12px" }}>{p.topic}</td>
-                          <td className="mono" style={{ fontSize: "12px", color: p.views >= 100000 ? "var(--accent)" : "inherit" }}>{fmt(p.views)}</td>
-                          <td className="mono" style={{ fontSize: "12px" }}>{fmt(p.likes)}</td>
-                          <td className="mono" style={{ fontSize: "12px", color: p.engagementRate >= 5 ? "var(--green)" : "inherit" }}>{p.engagementRate}%</td>
-                          <td className="mono" style={{ fontSize: "12px", color: "var(--muted)" }}>{p.daysAgo}d</td>
-                          <td style={{ fontSize: "12px", color: "var(--muted)" }}>{p.format}</td>
+                  {res.scraper.posts?.length > 0 ? (
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>Platform</th>
+                          <th style={{ minWidth: "220px" }}>Hook</th>
+                          <th>Topic</th>
+                          <th>Views</th>
+                          <th>Likes</th>
+                          <th>ER%</th>
+                          <th>Age</th>
+                          <th>Format</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {res.scraper.posts.sort((a, b) => b.views - a.views).map((p, i) => (
+                          <tr key={i}>
+                            <td><span className={`plat plat-${(p.platform || "").toLowerCase()}`}>{p.platform}</span></td>
+                            <td style={{ maxWidth: "240px", fontSize: "13px" }}>
+                              {p.hook}{p.viral && <span className="vtag">Viral</span>}
+                            </td>
+                            <td style={{ color: "var(--muted)", fontSize: "12px" }}>{p.topic}</td>
+                            <td className="mono" style={{ fontSize: "12px", color: p.views >= 100000 ? "var(--accent)" : "inherit" }}>{fmt(p.views)}</td>
+                            <td className="mono" style={{ fontSize: "12px" }}>{fmt(p.likes)}</td>
+                            <td className="mono" style={{ fontSize: "12px", color: p.engagementRate >= 5 ? "var(--green)" : "inherit" }}>{p.engagementRate}%</td>
+                            <td className="mono" style={{ fontSize: "12px", color: "var(--muted)" }}>{p.daysAgo}d</td>
+                            <td style={{ fontSize: "12px", color: "var(--muted)" }}>{p.format}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div style={{ padding: "40px 0", textAlign: "center", color: "var(--muted)", fontSize: "14px" }}>
+                      No posts found. Check your Apify token in Vercel environment variables.
+                    </div>
+                  )}
                   <div style={{ marginTop: "12px", fontSize: "11px", color: "var(--muted)", fontFamily: "'IBM Plex Mono', monospace" }}>
-                    Agent 01 — Real data via Apify when keys are set, AI simulation as fallback.
+                    {res.scraper.posts?.length > 0
+                      ? `${res.scraper.posts.length} posts · sorted by views · AI simulation (add APIFY_TOKEN for live data)`
+                      : "Agent 01 — Add APIFY_TOKEN in Vercel env vars for real data"}
                   </div>
                 </div>
               )}
 
+              {/* ── TAB 02: VALIDATOR ── */}
               {tab === "validator" && res.validator && (
                 <div>
                   <div className="recbox">
                     <div className="reclabel">✦ AI Recommendation</div>
                     <div className="rectext">{res.validator.recommendation}</div>
                   </div>
+
                   <div className="slabel">Top Topics by Avg Views</div>
                   <div style={{ overflowX: "auto", marginBottom: "24px" }}>
                     <table className="tbl">
@@ -455,6 +583,7 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
+
                   <div className="slabel">Top Formats</div>
                   <div className="fcards">
                     {(res.validator.topFormats || []).map((f, i) => (
@@ -465,6 +594,7 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+
                   {res.validator.viralSignals?.length > 0 && (
                     <div style={{ marginBottom: "14px" }}>
                       <div className="slabel">Viral Signals</div>
@@ -480,15 +610,20 @@ export default function App() {
                 </div>
               )}
 
+              {/* ── TAB 03: SCRIPT ── */}
               {tab === "script" && res.script && (
                 <div>
                   <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "22px", flexWrap: "wrap" }}>
                     <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: "17px" }}>{res.script.topic}</div>
-                    <span className="mono" style={{ fontSize: "11px", color: "var(--muted)", background: "var(--bg3)", padding: "3px 9px", borderRadius: "4px", border: "1px solid var(--border)" }}>{res.script.duration}</span>
+                    <span className="mono" style={{ fontSize: "11px", color: "var(--muted)", background: "var(--bg3)", padding: "3px 9px", borderRadius: "4px", border: "1px solid var(--border)" }}>
+                      {res.script.duration}
+                    </span>
                   </div>
                   {res.script.script && [
-                    { k: "beat1", l: "Beat 1 — Setup" }, { k: "beat2", l: "Beat 2 — Value" },
-                    { k: "beat3", l: "Beat 3 — Proof / Payoff" }, { k: "cta", l: "CTA — Comment Trigger" },
+                    { k: "beat1", l: "Beat 1 — Setup" },
+                    { k: "beat2", l: "Beat 2 — Value" },
+                    { k: "beat3", l: "Beat 3 — Proof / Payoff" },
+                    { k: "cta",   l: "CTA — Comment Trigger" },
                   ].map(({ k, l }) => (
                     <div key={k} className="beat">
                       <div className="beat-l">{l}</div>
@@ -498,12 +633,15 @@ export default function App() {
                   {res.script.notes?.length > 0 && (
                     <div style={{ marginTop: "18px", padding: "14px 18px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "6px" }}>
                       <div className="slabel" style={{ marginBottom: "8px" }}>Voice Match Notes</div>
-                      {res.script.notes.map((n, i) => <div key={i} style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "4px" }}>· {n}</div>)}
+                      {res.script.notes.map((n, i) => (
+                        <div key={i} style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "4px" }}>· {n}</div>
+                      ))}
                     </div>
                   )}
                 </div>
               )}
 
+              {/* ── TAB 04: HOOKS ── */}
               {tab === "hooks" && res.hooks && (
                 <div>
                   {(res.hooks.hooks || []).map((h, i) => (
@@ -515,7 +653,9 @@ export default function App() {
                           <span className="hpat">{h.pattern}</span>
                           <span className="hexpl">{h.explanation}</span>
                           <div className="cbar">
-                            <div className="ctrack"><div className="cfill" style={{ width: `${(h.confidence / 10) * 100}%` }} /></div>
+                            <div className="ctrack">
+                              <div className="cfill" style={{ width: `${(h.confidence / 10) * 100}%` }} />
+                            </div>
                             <span className="cnum">{h.confidence}/10</span>
                           </div>
                         </div>
@@ -525,7 +665,9 @@ export default function App() {
                   {res.hooks.recommendedIndex !== undefined && (
                     <div className="recbox" style={{ marginTop: "18px" }}>
                       <div className="reclabel">★ Use This Hook Today</div>
-                      <div className="rectext">Hook {res.hooks.recommendedIndex + 1} — highest confidence for your niche and current trends.</div>
+                      <div className="rectext">
+                        Hook {res.hooks.recommendedIndex + 1} — highest confidence for your niche and current trends.
+                      </div>
                     </div>
                   )}
                   <div className="divider" />
@@ -535,6 +677,7 @@ export default function App() {
                   </div>
                 </div>
               )}
+
             </div>
           )}
         </div>
